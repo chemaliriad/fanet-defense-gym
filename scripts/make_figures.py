@@ -36,9 +36,10 @@ LABELS = {
     "q": "Q-learning (tabular)",
     "sarsa": "SARSA (tabular)",
     "ppo": "PPO (shared policy)",
+    "ppo_bc": "PPO + behaviour cloning",
     "oracle (privileged)": "Oracle (privileged)",
 }
-LEARNED = ("ppo", "q", "sarsa")
+LEARNED = ("ppo", "q", "sarsa", "ppo_bc")
 SUITE_LABELS = {
     "test": "Test (in-distribution)",
     "ood_large_swarm": "Larger swarms (21-24 drones)",
@@ -117,13 +118,19 @@ def fig_curves(summary: dict[str, Any], theme: str) -> Path:
     fig, ax = plt.subplots(figsize=(7.4, 3.8), dpi=150, facecolor=th["surface"])
     _style(ax, th)
     ax.grid(axis="y", color=th["grid"], lw=1)
-    for slot, algo in zip(("s1", "s2", "s3"), LEARNED, strict=True):
+    for slot, algo in zip(("s1", "s2", "s3", "s4"), LEARNED, strict=True):
+        if algo not in summary["summary"]:
+            continue
         runs = summary["curves"].get(algo) or {}
-        sampled = algo == "ppo" and summary["meta"].get("ppo_eval_mode") == "sampled"
+        sampled = (
+            algo in ("ppo", "ppo_bc") and summary["meta"].get(f"{algo}_eval_mode") == "sampled"
+        )
         key = "val_return_sampled" if sampled else "val_return"
         label = LABELS[algo]
         if algo == "ppo":
             label = f"PPO (shared policy, {'sampled actions' if sampled else 'greedy'})"
+        elif algo == "ppo_bc":
+            label += f" ({'sampled actions' if sampled else 'greedy'})"
         series = [[r for r in rows if key in r] for rows in runs.values()]
         series = [s for s in series if s]
         if not series:
@@ -185,16 +192,19 @@ def _run_to(policy: Policy, spec: Any, t_stop: int) -> FanetSim:
 
 
 def defended_policy(summary: dict[str, Any]) -> tuple[Policy, str]:
-    ppo_file = RES / "policies" / "ppo_seed0.npz"
     s = summary["summary"]
-    if (
-        ppo_file.exists()
-        and s.get("ppo", {}).get("test", {}).get("ret", [0])[0]
-        >= s["watchdog_tuned"]["test"]["ret"][0]
-    ):
-        from fanet_defense.rollout import NumpyPPOPolicy
+    candidates = [
+        algo
+        for algo in ("ppo", "ppo_bc")
+        if algo in s and (RES / "policies" / f"{algo}_seed0.npz").exists()
+    ]
+    for algo in sorted(candidates, key=lambda n: s[n]["test"]["ret"][0], reverse=True):
+        if s[algo]["test"]["ret"][0] >= s["watchdog_tuned"]["test"]["ret"][0]:
+            from fanet_defense.rollout import NumpyPPOPolicy
 
-        return NumpyPPOPolicy.load(ppo_file), "PPO (seed 0)"
+            return NumpyPPOPolicy.load(RES / "policies" / f"{algo}_seed0.npz"), _label(
+                f"{algo}_seed0"
+            )
     w = summary["meta"]["watchdog_tuned"]
     return WatchdogPolicy(EnvConfig(), w["th_fwd"], w["th_anom"], w["th_pdr"]), "tuned watchdog"
 
@@ -252,12 +262,16 @@ def _label(name: str) -> str:
 def caption(summary: dict[str, Any]) -> str:
     meta = summary["meta"]
     seeds = meta["seeds"]
+    bc_mode = ""
+    if "ppo_bc" in summary["summary"]:
+        mode = "stochastically" if meta.get("ppo_bc_eval_mode") == "sampled" else "greedily"
+        bc_mode = f"; PPO + behaviour cloning acts {mode} (chosen on validation)"
     return (
         f"Held-out test suite of {meta['suites']['test']['n']} scenarios, identical for every"
         f" policy. Learned policies: {len(seeds)} training seeds x {meta['steps_per_run']:,}"
         f" environment steps, mean over seeds with a Student-t 95 % interval; PPO acts"
         f" {'stochastically' if meta.get('ppo_eval_mode') == 'sampled' else 'greedily'}"
-        " (chosen on validation). Scripted policies: bootstrap 95 % interval over scenarios.\n"
+        f" (chosen on validation){bc_mode}. Scripted policies: bootstrap 95 % interval over scenarios.\n"
     )
 
 
@@ -271,6 +285,7 @@ def results_tables(summary: dict[str, Any]) -> tuple[str, str]:
         "q",
         "sarsa",
         "ppo",
+        "ppo_bc",
         "oracle (privileged)",
     ]
     names = [n for n in order if n in s]
@@ -301,11 +316,34 @@ def write_results_md(summary: dict[str, Any]) -> Path:
         f"{LABELS[algo]} {s[algo]['test']['false_blocks'][0]:.1f} vs tuned watchdog"
         f" {tuned_false_blocks:.1f}"
         for algo in LEARNED
+        if algo in s
     )
-    sarsa_returns = ", ".join(
-        f"seed {seed}: {ret:.1f}"
-        for seed, ret in zip(meta["seeds"], s["sarsa"]["test"]["per_seed_ret"], strict=True)
-    )
+    seed_reports = []
+    for algo in LEARNED:
+        if algo not in s:
+            continue
+        returns = s[algo]["test"]["per_seed_ret"]
+        threshold = max(returns) / 2
+        per_seed = ", ".join(
+            f"seed {seed}: {ret:.1f}" + (" (failed)" if ret < threshold else "")
+            for seed, ret in zip(meta["seeds"], returns, strict=True)
+        )
+        seed_reports.append(f"{LABELS[algo]} per-seed test returns: {per_seed}.")
+    cloning_report = []
+    if "ppo_bc" in s:
+        initial = [
+            next(row for row in rows if row["env_steps"] == 0)
+            for rows in summary["curves"]["ppo_bc"].values()
+        ]
+        agreement = np.mean([row["bc_agreement"] for row in initial])
+        budget = np.mean([row["bc_env_steps"] for row in initial])
+        cloning_report = [
+            f"PPO + behaviour cloning agreement at env_steps = 0: {agreement:.1%}"
+            f" (mean over seeds); demonstration budget (bc_env_steps): {budget:,.0f}"
+            " environment steps per seed (mean over seeds)."
+        ]
+        mode = "with sampled actions" if meta.get("ppo_bc_eval_mode") == "sampled" else "greedily"
+        cloning_report.append(f"PPO + behaviour cloning is evaluated {mode}, chosen on validation.")
     paired = summary.get("paired_vs_watchdog_tuned_test", {})
     n_val = meta["val"]["n"]
     ood_sizes = ", ".join(
@@ -336,8 +374,11 @@ def write_results_md(summary: dict[str, Any]) -> Path:
         f" {100 * random['contained'][0]:.0f} % containment with"
         f" {random['false_blocks'][0]:.1f} false blocks per episode. The learned policies"
         f" block far more than the watchdogs (mean false blocks per episode:"
-        f" {learned_false_blocks}). The SARSA interval is wide because one training seed"
-        f" failed; its per-seed test returns are {sarsa_returns}.",
+        f" {learned_false_blocks}).",
+        "",
+        "A training seed is marked failed only when its test return is below half of that policy's best seed return.",
+        *seed_reports,
+        *cloning_report,
         "",
         f"## Out-of-distribution families (return; scenarios per family: {ood_sizes})",
         "",
@@ -357,7 +398,7 @@ def write_results_md(summary: dict[str, Any]) -> Path:
         f"Tuned watchdog thresholds (random search, 40 trials on val): forwarding < {w['th_fwd']:.3f},"
         f" anomaly > {w['th_anom']:.3f}, own delivery < {w['th_pdr']:.3f}.",
         "",
-        f"Learning curves: PPO is scored on the {n_val} validation scenarios, the tabular learners on",
+        f"Learning curves: PPO{' and PPO + behaviour cloning are' if 'ppo_bc' in s else ' is'} scored on the {n_val} validation scenarios, the tabular learners on",
         "the first 16 of them (cheaper evaluation inside the training workers).",
         "",
     ]

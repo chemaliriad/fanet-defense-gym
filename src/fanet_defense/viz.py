@@ -23,6 +23,7 @@ THEMES: dict[str, dict[str, str]] = {
         "s1": "#2a78d6",  # benign
         "s2": "#eb6834",  # attacking
         "s3": "#1baf7a",  # dormant implant
+        "s4": "#eda100",
     },
     "dark": {
         "surface": "#1a1a19",
@@ -33,6 +34,7 @@ THEMES: dict[str, dict[str, str]] = {
         "s1": "#3987e5",
         "s2": "#d95926",
         "s3": "#199e70",
+        "s4": "#c98500",
     },
 }
 STATES = (  # (label, palette slot, marker)
