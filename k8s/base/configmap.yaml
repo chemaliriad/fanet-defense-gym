@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fanet-evaluate
+  labels:
+    app.kubernetes.io/name: fanet-defense
+data:
+  POLICY: watchdog
+  SPLIT: test
+  SUITE_SIZE: "200"
+  GENERATE_SIZE: "8000"
+  MASTER_SEED: "2026"
+  NUM_SHARDS: "8"  # must equal spec.completions of the Jobs

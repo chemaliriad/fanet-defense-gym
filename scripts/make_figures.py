@@ -1,0 +1,327 @@
+"""Figures (light and dark) and result tables from ``results/summary.json``.
+
+    python scripts/make_figures.py
+
+Writes docs/figures/*.png, docs/results.md, and refreshes the README block between
+``<!-- results:start -->`` and ``<!-- results:end -->`` so the README can never drift from the
+committed results.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+from typing import Any
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.lines import Line2D
+
+from fanet_defense import EnvConfig, FanetSim, ScenarioSampler
+from fanet_defense.policies import NoOpPolicy, Policy, WatchdogPolicy
+from fanet_defense.viz import THEMES, draw_snapshot, legend_handles
+
+ROOT = Path(__file__).resolve().parents[1]
+RES = ROOT / "results"
+FIG = ROOT / "docs" / "figures"
+LABELS = {
+    "noop": "No-op",
+    "random": "Random",
+    "watchdog": "Watchdog (default thresholds)",
+    "watchdog_tuned": "Watchdog (tuned on val)",
+    "q": "Q-learning (tabular)",
+    "sarsa": "SARSA (tabular)",
+    "ppo": "PPO (shared policy)",
+    "oracle (privileged)": "Oracle (privileged)",
+}
+LEARNED = ("ppo", "q", "sarsa")
+SUITE_LABELS = {
+    "test": "Test (200, in-distribution)",
+    "ood_large_swarm": "Larger swarms (21-24 drones)",
+    "ood_flood_heavy": "Flood-heavy attacks",
+    "ood_stealthy": "Stealthy implants (stealth >= 0.5)",
+}
+
+
+def _style(ax: Any, th: dict[str, str]) -> None:
+    ax.set_facecolor(th["surface"])
+    for name, spine in ax.spines.items():
+        spine.set_visible(name == "bottom")
+        spine.set_color(th["grid"])
+    ax.tick_params(colors=th["ink2"], labelsize=8, length=0)
+    ax.xaxis.label.set_color(th["ink2"])
+    ax.yaxis.label.set_color(th["ink2"])
+    ax.grid(axis="x", color=th["grid"], lw=1)
+    ax.set_axisbelow(True)
+
+
+def fig_results(summary: dict[str, Any], theme: str) -> Path:
+    th = THEMES[theme]
+    s = summary["summary"]
+    rows = [(n, *s[n]["test"]["ret"]) for n in s if n != "oracle (privileged)"]
+    rows.sort(key=lambda r: r[1])
+    oracle = s["oracle (privileged)"]["test"]["ret"][0]
+    fig, ax = plt.subplots(figsize=(7.4, 0.42 * len(rows) + 1.2), dpi=150, facecolor=th["surface"])
+    _style(ax, th)
+    for k, (name, m, lo, hi) in enumerate(rows):
+        color = th["s1"] if name in LEARNED else th["muted"]
+        ax.plot([lo, hi], [k, k], color=color, lw=2, solid_capstyle="round", zorder=2)
+        ax.scatter([m], [k], s=64, color=color, edgecolor=th["surface"], linewidth=2, zorder=3)
+        ax.text(hi + 2, k, f"{m:.1f}", va="center", fontsize=8, color=th["ink2"])
+    ax.axvline(oracle, color=th["ink2"], lw=1, ls=(0, (4, 3)), zorder=1)
+    ax.text(
+        oracle - 1,
+        len(rows) - 0.55,
+        f"oracle (privileged) {oracle:.1f}",
+        ha="right",
+        fontsize=8,
+        color=th["ink2"],
+    )
+    ax.set_yticks(range(len(rows)), [LABELS.get(n, n) for n, *_ in rows])
+    ax.set_xlabel("Episode return on 200 held-out test scenarios (mean, 95% interval)")
+    lo_all = min(r[2] for r in rows)
+    ax.set_xlim(min(0, lo_all - 5), oracle + 12)
+    handles = [
+        Line2D(
+            [],
+            [],
+            marker="o",
+            ls="",
+            color=th["s1"],
+            label="learned (5 training seeds, t-interval)",
+        ),
+        Line2D(
+            [],
+            [],
+            marker="o",
+            ls="",
+            color=th["muted"],
+            label="scripted (bootstrap over scenarios)",
+        ),
+    ]
+    ax.legend(handles=handles, loc="lower right", fontsize=7, frameon=False, labelcolor=th["ink2"])
+    fig.tight_layout()
+    out = FIG / f"results_test_{theme}.png"
+    fig.savefig(out, facecolor=th["surface"])
+    plt.close(fig)
+    return out
+
+
+def fig_curves(summary: dict[str, Any], theme: str) -> Path:
+    th = THEMES[theme]
+    fig, ax = plt.subplots(figsize=(7.4, 3.8), dpi=150, facecolor=th["surface"])
+    _style(ax, th)
+    ax.grid(axis="y", color=th["grid"], lw=1)
+    for slot, algo in zip(("s1", "s2", "s3"), LEARNED, strict=True):
+        runs = summary["curves"].get(algo) or {}
+        series = [[r for r in rows if "val_return" in r] for rows in runs.values()]
+        series = [s for s in series if s]
+        if not series:
+            continue
+        n = min(len(s) for s in series)
+        x = np.array([r["env_steps"] for r in series[0][:n]]) / 1000
+        y = np.array([[r["val_return"] for r in s[:n]] for s in series])
+        mean = y.mean(axis=0)
+        ax.fill_between(x, y.min(axis=0), y.max(axis=0), color=th[slot], alpha=0.10, lw=0)
+        ax.plot(x, mean, color=th[slot], lw=2, solid_capstyle="round", label=LABELS[algo])
+        ax.scatter(
+            [x[-1]],
+            [mean[-1]],
+            s=40,
+            color=th[slot],
+            edgecolor=th["surface"],
+            linewidth=2,
+            zorder=3,
+        )
+    refs = summary["meta"].get("val_reference_return", {})
+    for key, label in (
+        ("oracle", "oracle (privileged)"),
+        ("watchdog_tuned", "tuned watchdog"),
+        ("noop", "no-op"),
+    ):
+        if key in refs:
+            ax.axhline(refs[key], color=th["muted"], lw=1, ls=(0, (4, 3)), zorder=1)
+            ax.text(
+                ax.get_xlim()[0],
+                refs[key] + 2,
+                f" {label}",
+                fontsize=7,
+                color=th["ink2"],
+                va="bottom",
+            )
+    ax.set_xlabel("Environment steps (thousands)")
+    ax.set_ylabel("Return on 32 validation scenarios")
+    ax.legend(loc="lower right", fontsize=7, frameon=False, labelcolor=th["ink2"])
+    fig.tight_layout()
+    out = FIG / f"learning_curves_{theme}.png"
+    fig.savefig(out, facecolor=th["surface"])
+    plt.close(fig)
+    return out
+
+
+def _run_to(policy: Policy, spec: Any, t_stop: int) -> FanetSim:
+    sim = FanetSim(spec, EnvConfig())
+    policy.reset(spec)
+    obs = sim.obs
+    while sim.t < t_stop:
+        obs, *_ = sim.step(policy.act(obs, sim if policy.privileged else None))
+    return sim
+
+
+def defended_policy(summary: dict[str, Any]) -> tuple[Policy, str]:
+    ppo_file = RES / "policies" / "ppo_seed0.npz"
+    s = summary["summary"]
+    if (
+        ppo_file.exists()
+        and s.get("ppo", {}).get("test", {}).get("ret", [0])[0]
+        >= s["watchdog_tuned"]["test"]["ret"][0]
+    ):
+        from fanet_defense.rollout import NumpyPPOPolicy
+
+        return NumpyPPOPolicy.load(ppo_file), "PPO (seed 0)"
+    w = summary["meta"]["watchdog_tuned"]
+    return WatchdogPolicy(EnvConfig(), w["th_fwd"], w["th_anom"], w["th_pdr"]), "tuned watchdog"
+
+
+def fig_snapshot(summary: dict[str, Any], theme: str, t_stop: int = 90) -> Path:
+    th = THEMES[theme]
+    sampler = ScenarioSampler("medium")
+    defended, name = defended_policy(summary)
+    for seed in range(200):  # first seed (deterministic) where doing nothing visibly loses
+        spec = sampler.sample(seed)
+        if spec.n_drones < 14:
+            continue
+        a, b = _run_to(NoOpPolicy(), spec, t_stop), _run_to(defended, spec, t_stop)
+        if a.comp[: a.n].sum() >= 4 and b.comp[: b.n].sum() <= 1:
+            break
+    fig, axes = plt.subplots(1, 2, figsize=(9.4, 5.0), dpi=150, facecolor=th["surface"])
+    for ax, sim, title in ((axes[0], a, "No defense"), (axes[1], b, f"Defended by {name}")):
+        info = f"{title}: {int(sim.comp[: sim.n].sum())} of {sim.n} drones compromised at t = {sim.t} s"
+        draw_snapshot(ax, sim.snapshot(), spec, theme, info)
+    fig.legend(
+        handles=legend_handles(theme),
+        loc="lower center",
+        ncol=4,
+        fontsize=7,
+        frameon=False,
+        labelcolor=th["ink2"],
+    )
+    fig.suptitle(
+        f"Same scenario {spec.scenario_id}, same mobility and attacker dice",
+        fontsize=9,
+        color=th["ink2"],
+        x=0.02,
+        ha="left",
+    )
+    fig.tight_layout(rect=(0, 0.08, 1, 0.97))
+    out = FIG / f"snapshot_{theme}.png"
+    fig.savefig(out, facecolor=th["surface"])
+    plt.close(fig)
+    return out
+
+
+def _ci(v: list[float], fmt: str = "{:.1f}") -> str:
+    m, lo, hi = v
+    return f"{fmt.format(m)} [{fmt.format(lo)}, {fmt.format(hi)}]"
+
+
+def results_tables(summary: dict[str, Any]) -> tuple[str, str]:
+    s = summary["summary"]
+    order = [
+        "noop",
+        "random",
+        "watchdog",
+        "watchdog_tuned",
+        "q",
+        "sarsa",
+        "ppo",
+        "oracle (privileged)",
+    ]
+    names = [n for n in order if n in s]
+    head = "| Policy | Return | Availability | Compromised share | False blocks | Contained |\n|---|---|---|---|---|---|\n"
+    rows = ""
+    for n in names:
+        t = s[n]["test"]
+        rows += (
+            f"| {LABELS[n]} | {_ci(t['ret'])} | {t['availability'][0]:.3f} | {t['compromised'][0]:.3f} "
+            f"| {t['false_blocks'][0]:.1f} | {100 * t['contained'][0]:.0f} % |\n"
+        )
+    main = head + rows
+    suites = [k for k in SUITE_LABELS if k in s[names[0]]]
+    ood = "| Policy | " + " | ".join(SUITE_LABELS[k] for k in suites) + " |\n"
+    ood += "|---|" + "---|" * len(suites) + "\n"
+    for n in names:
+        ood += f"| {LABELS[n]} | " + " | ".join(_ci(s[n][k]["ret"]) for k in suites) + " |\n"
+    return main, ood
+
+
+def write_results_md(summary: dict[str, Any]) -> Path:
+    meta = summary["meta"]
+    main, ood = results_tables(summary)
+    paired = summary.get("paired_vs_watchdog_tuned_test", {})
+    lines = [
+        "# Results",
+        "",
+        f"Generated by `scripts/make_figures.py` from `results/summary.json` (commit `{meta['git_commit']}`,"
+        f" {meta['date']}, {meta['machine']}, Python {meta['python']}, NumPy {meta['numpy']},"
+        f" PyTorch {meta.get('torch', 'n/a')}). Wall clock for the whole protocol: {meta['wall_clock_s'] / 60:.0f} min.",
+        "",
+        f"Protocol: {meta['steps_per_run']:,} environment steps per training run, training seeds {meta['seeds']},",
+        "fresh training scenarios every episode, thresholds and hyper-parameters chosen on 32 validation",
+        "scenarios, evaluation on identical held-out scenarios. Intervals are 95 %: Student t over training",
+        "seeds for learned policies, percentile bootstrap over scenarios for scripted ones.",
+        "",
+        "## Test suite (200 scenarios)",
+        "",
+        main,
+        "Availability is the per-step mission availability averaged over the episode; the compromised share",
+        "is averaged over the episode; contained means that the active threat was suppressed for at least",
+        "5 consecutive steps.",
+        "",
+        "## Out-of-distribution families (return)",
+        "",
+        ood,
+        "## Paired difference against the tuned watchdog (test, return)",
+        "",
+        "| Policy | Mean difference [95 % CI] |",
+        "|---|---|",
+    ]
+    lines += [f"| {k} | {_ci(v)} |" for k, v in sorted(paired.items())]
+    w = meta["watchdog_tuned"]
+    lines += [
+        "",
+        f"Tuned watchdog thresholds (random search, 40 trials on val): forwarding < {w['th_fwd']:.3f},"
+        f" anomaly > {w['th_anom']:.3f}, own delivery < {w['th_pdr']:.3f}.",
+        "",
+    ]
+    out = ROOT / "docs" / "results.md"
+    out.write_text("\n".join(lines), encoding="utf-8")
+    return out
+
+
+def refresh_readme(summary: dict[str, Any]) -> None:
+    readme = ROOT / "README.md"
+    text = readme.read_text(encoding="utf-8")
+    main, _ = results_tables(summary)
+    block = f"<!-- results:start -->\n{main}<!-- results:end -->"
+    new = re.sub(r"<!-- results:start -->.*?<!-- results:end -->", block, text, flags=re.S)
+    if new != text:
+        readme.write_text(new, encoding="utf-8")
+
+
+def main() -> None:
+    FIG.mkdir(parents=True, exist_ok=True)
+    summary = json.loads((RES / "summary.json").read_text(encoding="utf-8"))
+    for theme in ("light", "dark"):
+        for fn in (fig_results, fig_curves, fig_snapshot):
+            print("wrote", fn(summary, theme))
+    print("wrote", write_results_md(summary))
+    refresh_readme(summary)
+
+
+if __name__ == "__main__":
+    main()

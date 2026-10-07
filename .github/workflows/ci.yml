@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: Install (CPU PyTorch)
+        run: pip install --extra-index-url https://download.pytorch.org/whl/cpu -e ".[dev,train,viz]"
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: Type-check
+        run: mypy
+      - name: Tests
+        run: pytest -m "not slow" --cov=fanet_defense --cov-report=term-missing
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t fanet-defense:ci .
+      - name: Smoke-run an evaluation inside the container
+        run: docker run --rm fanet-defense:ci evaluate --n 4 --policy watchdog
+
+  kubernetes-manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render with kustomize
+        run: kubectl kustomize k8s/base > rendered.yaml
+      - name: Validate against the Kubernetes schemas
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz
+          ./kubeconform -strict -summary rendered.yaml
