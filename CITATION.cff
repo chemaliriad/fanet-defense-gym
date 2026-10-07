@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use this environment, please cite it as below."
+title: "fanet-defense-gym: a procedurally generated cyber-defense environment for drone swarms"
+type: software
+authors:
+  - family-names: Chemali
+    given-names: Riad
+version: 0.1.0
+license: MIT
+repository-code: "https://github.com/chemaliriad/fanet-defense-gym"
+keywords:
+  - reinforcement learning
+  - multi-agent
+  - cyber defense
+  - drone swarms
+  - benchmark
+  - PettingZoo

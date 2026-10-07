@@ -155,7 +155,7 @@ def fig_curves(summary: dict[str, Any], theme: str) -> Path:
                 va="bottom",
             )
     ax.set_xlabel("Environment steps (thousands)")
-    ax.set_ylabel("Return on 32 validation scenarios")
+    ax.set_ylabel("Mean return on validation scenarios")
     ax.legend(loc="lower right", fontsize=7, frameon=False, labelcolor=th["ink2"])
     fig.tight_layout()
     out = FIG / f"learning_curves_{theme}.png"
@@ -230,6 +230,26 @@ def _ci(v: list[float], fmt: str = "{:.1f}") -> str:
     return f"{fmt.format(m)} [{fmt.format(lo)}, {fmt.format(hi)}]"
 
 
+def _label(name: str) -> str:
+    """``ppo_seed0`` -> ``PPO (shared policy), seed 0``; fixed policies keep their label."""
+    algo, sep, seed = name.rpartition("_seed")
+    if sep and algo in LEARNED and seed.isdigit():
+        return f"{LABELS[algo]}, seed {seed}"
+    return LABELS.get(name, name)
+
+
+def caption(summary: dict[str, Any]) -> str:
+    meta = summary["meta"]
+    seeds = meta["seeds"]
+    return (
+        f"Held-out test suite of {meta['suites']['test']['n']} scenarios, identical for every"
+        f" policy. Learned policies: {len(seeds)} training seeds x {meta['steps_per_run']:,}"
+        f" environment steps, mean over seeds with a Student-t 95 % interval; PPO acts"
+        f" {'stochastically' if meta.get('ppo_eval_mode') == 'sampled' else 'greedily'}"
+        " (chosen on validation). Scripted policies: bootstrap 95 % interval over scenarios.\n"
+    )
+
+
 def results_tables(summary: dict[str, Any]) -> tuple[str, str]:
     s = summary["summary"]
     order = [
@@ -264,6 +284,10 @@ def write_results_md(summary: dict[str, Any]) -> Path:
     meta = summary["meta"]
     main, ood = results_tables(summary)
     paired = summary.get("paired_vs_watchdog_tuned_test", {})
+    n_val = meta["val"]["n"]
+    ood_sizes = ", ".join(
+        f"{SUITE_LABELS[k].lower()} {v['n']}" for k, v in meta["suites"].items() if k != "test"
+    )
     lines = [
         "# Results",
         "",
@@ -272,31 +296,39 @@ def write_results_md(summary: dict[str, Any]) -> Path:
         f" PyTorch {meta.get('torch', 'n/a')}). Wall clock for the whole protocol: {meta['wall_clock_s'] / 60:.0f} min.",
         "",
         f"Protocol: {meta['steps_per_run']:,} environment steps per training run, training seeds {meta['seeds']},",
-        "fresh training scenarios every episode, thresholds and hyper-parameters chosen on 32 validation",
+        f"fresh training scenarios every episode, thresholds and hyper-parameters chosen on {n_val} validation",
         "scenarios, evaluation on identical held-out scenarios. Intervals are 95 %: Student t over training",
-        "seeds for learned policies, percentile bootstrap over scenarios for scripted ones.",
+        "seeds for learned policies, percentile bootstrap over scenarios for scripted ones. PPO is evaluated",
+        f"{'with sampled actions' if meta.get('ppo_eval_mode') == 'sampled' else 'greedily'}, the mode with",
+        "the higher validation return (decided once for all seeds, before the test suite was touched).",
         "",
-        "## Test suite (200 scenarios)",
+        f"## Test suite ({meta['suites']['test']['n']} scenarios)",
         "",
         main,
         "Availability is the per-step mission availability averaged over the episode; the compromised share",
         "is averaged over the episode; contained means that the active threat was suppressed for at least",
         "5 consecutive steps.",
         "",
-        "## Out-of-distribution families (return)",
+        f"## Out-of-distribution families (return; scenarios per family: {ood_sizes})",
         "",
         ood,
         "## Paired difference against the tuned watchdog (test, return)",
         "",
+        "Positive means better than the tuned watchdog on the same scenarios; one row per training seed",
+        "for learned policies.",
+        "",
         "| Policy | Mean difference [95 % CI] |",
         "|---|---|",
     ]
-    lines += [f"| {k} | {_ci(v)} |" for k, v in sorted(paired.items())]
+    lines += [f"| {_label(k)} | {_ci(v)} |" for k, v in sorted(paired.items())]
     w = meta["watchdog_tuned"]
     lines += [
         "",
         f"Tuned watchdog thresholds (random search, 40 trials on val): forwarding < {w['th_fwd']:.3f},"
         f" anomaly > {w['th_anom']:.3f}, own delivery < {w['th_pdr']:.3f}.",
+        "",
+        f"Learning curves: PPO is scored on the {n_val} validation scenarios, the tabular learners on",
+        "the first 16 of them (cheaper evaluation inside the training workers).",
         "",
     ]
     out = ROOT / "docs" / "results.md"
@@ -308,7 +340,7 @@ def refresh_readme(summary: dict[str, Any]) -> None:
     readme = ROOT / "README.md"
     text = readme.read_text(encoding="utf-8")
     main, _ = results_tables(summary)
-    block = f"<!-- results:start -->\n{main}<!-- results:end -->"
+    block = f"<!-- results:start -->\n{caption(summary)}\n{main}<!-- results:end -->"
     new = re.sub(r"<!-- results:start -->.*?<!-- results:end -->", block, text, flags=re.S)
     if new != text:
         readme.write_text(new, encoding="utf-8")
