@@ -1,9 +1,11 @@
 # Kubernetes: sharded generation and evaluation
 
-Two Indexed Jobs share one ConfigMap:
+Three Indexed Jobs share one ConfigMap:
 
 * `fanet-generate-suite` writes `GENERATE_SIZE` training scenarios as `NUM_SHARDS` JSONL files;
-* `fanet-evaluate` evaluates `POLICY` on the `SUITE_SIZE` test scenarios, one shard per pod.
+* `fanet-evaluate` evaluates `POLICY` on the `SUITE_SIZE` test scenarios, one shard per pod;
+* `fanet-dataset` writes language-model training records (prompt, teacher answer,
+  verifiable reward) for `GENERATE_SIZE` training scenarios, one JSONL shard per pod.
 
 Each pod reads `JOB_COMPLETION_INDEX` (set by Kubernetes) and handles scenarios
 `index, index + N, index + 2N, ...`. Shards are disjoint and their union is the full suite,

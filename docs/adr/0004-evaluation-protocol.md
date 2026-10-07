@@ -21,5 +21,6 @@ exploration noise, seed luck and over-fitting to one hand-made scenario.
 
 ## Consequences
 
-Experiments cost about an hour of CPU on a laptop; `scripts/run_experiments.py` reproduces
-them end to end.
+The full protocol (5 seeds x 300k steps) costs a few hours of CPU on a laptop and runs with
+`make repro`. The published results come from a lighter run (3 seeds x 150k steps, 2 cores)
+whose exact settings are recorded in `results/summary.json`.

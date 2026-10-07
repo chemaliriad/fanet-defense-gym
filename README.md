@@ -18,7 +18,10 @@ are protecting.**
 ## What is in the box
 
 * **Environment**: PettingZoo `ParallelEnv` (one agent per drone, shared spaces, so one
-  policy serves swarms of any size); about 1 ms per step in pure numpy.
+  policy serves swarms of any size); roughly 1 to 2 ms per step in pure numpy.
+* **Language-model interface**: the same scenarios as text prompts with JSON answers and
+  verifiable rewards (Gymnasium `Text` spaces), a sharded generator of prompt / teacher answer
+  / reward records, and a minimal client for OpenAI-compatible endpoints such as Mistral's API.
 * **Scenario generation at scale**: every episode is a `ScenarioSpec` (JSON, content hash)
   drawn from difficulty profiles; `train` / `val` / `test` are disjoint seed namespaces;
   suites shard deterministically across workers or Kubernetes pods.
@@ -29,7 +32,7 @@ are protecting.**
   validation), tabular Q-learning and SARSA, PPO with parameter sharing, privileged oracle.
 * **Evaluation harness**: paired scenarios, multiple training seeds, bootstrap and Student-t
   intervals, out-of-distribution families, reward-hacking tests.
-* **Engineering**: typed package, CLI, 90 tests, GitHub Actions (lint, types, tests on
+* **Engineering**: typed package, CLI, 108 tests, GitHub Actions (lint, types, tests on
   3.10 to 3.12, Docker build, Kubernetes manifest validation), non-root Docker image,
   Indexed Kubernetes Jobs for sharded generation and evaluation.
 
@@ -56,6 +59,53 @@ while env.agents:
     actions = {agent: env.action_space(agent).sample() for agent in env.agents}
     obs, rewards, terminations, truncations, infos = env.step(actions)
 ```
+
+## Language-model interface
+
+The text view gives a central defender exactly the local evidence the drone agents see, as
+numbers and fixed tokens only (no free text from the environment, so no prompt-injection
+channel). A prompt at t = 40 s, and the watchdog heuristic's answer (default thresholds):
+
+```text
+t=40/200 | drones=8
+drone anomaly delivery neighbours(id:forwarding%)
+d00 -0.37 1.00 d05:100 d02:100
+d01 -0.22 1.00 d02:100 d06:100
+d02 +0.39 0.99 d01:75 d00:100 d05:100 d06:99
+d03 -0.16 0.92 -
+d04 offline (re-flashing)
+d05 +0.35 0.97 d00:100 d02:100
+d06 +0.05 0.63 d07:100 d01:74 d02:100
+d07 +0.23 0.53 d06:98
+```
+
+```json
+{"actions": []}
+```
+
+Answers are parsed defensively (bad JSON, unknown drones, illegal targets and duplicates are
+ignored and counted, with an optional penalty), and the reward is computed by the simulator,
+so it is verifiable. A test checks that playing a policy through text gives exactly the same
+return as playing it on the numeric environment.
+
+```python
+from fanet_defense import ScenarioSampler
+from fanet_defense.llm import ChatCompletionsDefender, run_text_episode
+from fanet_defense.text_env import FanetTextEnv
+
+env = FanetTextEnv(sampler=ScenarioSampler("medium"), decision_interval=5)
+defender = ChatCompletionsDefender(model="mistral-small-latest")  # reads MISTRAL_API_KEY
+episode = run_text_episode(env, defender, seed=0)
+```
+
+```bash
+# Supervised and RL training records from a teacher policy, one shard per worker or pod
+fanet-defense dataset --n 1000 --split train --teacher watchdog --interval 5 \
+    --shard 0 --num-shards 8 --out data/sft-shard-0.jsonl
+```
+
+No language model has been evaluated in this repository yet; the interface, the parser and
+the record generator are what is tested.
 
 ## The environment in one minute
 
@@ -103,7 +153,8 @@ These are the checks I wanted to be able to answer in front of a sceptical revie
   and "do nothing" all lose; invalid actions are bit-for-bit no-ops (tests).
 * **Is the comparison fair?** Same scenarios for every policy, same interaction budget for
   every learner, thresholds and hyper-parameters chosen on validation, test touched once,
-  5 training seeds, intervals reported.
+  several training seeds (3 in the published laptop run, 5 with `make repro`), intervals
+  reported.
 * **Does it generalise?** Three out-of-distribution families (larger swarms, flood-heavy,
   stealthy) are reported next to the in-distribution test set.
 
@@ -128,9 +179,10 @@ Results say nothing about real drones. See [docs/design.md](docs/design.md#9-lim
 
 ## Roadmap
 
-* A text interface (observation rendered as text, JSON tool calls, verifiable reward) so
-  that LLM agents can be evaluated and trained on the same scenarios, plus a sharded
-  generator of prompt / action / reward instances.
+* Evaluate open-weight and API language models on the text interface, with a fixed call
+  budget and the same paired scenarios as the RL baselines.
+* Imitation then reinforcement (warm-start PPO from the watchdog), the RL analogue of
+  supervised fine-tuning followed by RL.
 * An adaptive (learned) attacker; inter-agent messages.
 * A pinned reproduction of TTCP CAGE Challenge 3 (CybORG) for comparison.
 

@@ -4,6 +4,7 @@ Commands
 --------
 generate-suite  write scenario specs (JSONL), optionally one shard of a larger suite
 evaluate        run a policy on a suite and print metrics with 95% confidence intervals
+dataset         write prompt / answer / reward records (text interface) for LLM training
 train           train PPO, Q-learning or SARSA and save the policy
 demo            render one scenario snapshot to PNG
 """
@@ -150,6 +151,19 @@ def cmd_demo(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_dataset(args: argparse.Namespace) -> int:
+    from .dataset import iter_records, write_jsonl
+
+    cfg = EnvConfig()
+    teacher = make_policy(args.teacher, cfg)
+    t0 = time.perf_counter()
+    count = write_jsonl(
+        iter_records(_suite(args), teacher, cfg, decision_interval=args.interval), args.out
+    )
+    print(f"wrote {count} records to {args.out} in {time.perf_counter() - t0:.1f}s")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="fanet-defense", description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -176,6 +190,13 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--workers", type=int, default=1)
     e.add_argument("--out", default=None, help="write summary and per-episode results as JSON")
     e.set_defaults(func=cmd_evaluate)
+
+    ds = sub.add_parser("dataset", help="write prompt/answer/reward records for LLM training")
+    suite_args(ds)
+    ds.add_argument("--teacher", default="watchdog", help="policy that writes the answers")
+    ds.add_argument("--interval", type=int, default=5, help="seconds between two decisions")
+    ds.add_argument("--out", required=True)
+    ds.set_defaults(func=cmd_dataset)
 
     t = sub.add_parser("train", help="train a policy")
     t.add_argument("--algo", choices=["ppo", "q", "sarsa"], default="ppo")

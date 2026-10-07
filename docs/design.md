@@ -182,6 +182,25 @@ uniformly. `mixed` picks a profile per scenario.
 * **Learned**: tabular Q-learning and SARSA on a discretised observation (same inputs,
   coarsened), and PPO with parameter sharing (independent PPO).
 
+## 8b. Text interface for language models
+
+`FanetTextEnv` (Gymnasium, `Text` observation and action spaces) exposes the same scenarios
+to a central defender that answers in JSON. Design rules:
+
+* **Same information**: the prompt is rendered from the observation vectors (plus neighbour
+  identifiers), so a language model sees exactly the local evidence the drone agents see.
+* **No injection channel**: prompts contain numbers and fixed tokens only; a test checks the
+  character set and the absence of hidden-state words.
+* **Defensive parsing**: answers can be wrapped in prose; malformed JSON, unknown drones,
+  offline drones, illegal block targets and duplicates are ignored and reported; an optional
+  per-error penalty exists for training.
+* **Verifiable reward**: the simulator scores every answer; `decision_interval` lets a model
+  act every few seconds to bound the number of calls per episode.
+* **Equivalence test**: a policy played through text gets exactly its numeric return.
+
+`dataset.iter_records` turns any teacher policy into prompt / answer / reward records
+(JSONL), sharded like scenario suites, for supervised fine-tuning or as RL prompts.
+
 ## 9. Limitations
 
 * Abstract link and loss model; no MAC contention, no real AODV route errors or timers.

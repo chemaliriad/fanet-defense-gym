@@ -1,0 +1,67 @@
+# Generate LLM training records (text prompt / teacher answer / verifiable reward) in parallel:
+# each pod writes one JSONL shard of the same reproducible dataset.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fanet-dataset
+  labels:
+    app.kubernetes.io/name: fanet-defense
+    app.kubernetes.io/component: dataset
+spec:
+  completionMode: Indexed
+  completions: 8
+  parallelism: 8
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fanet-defense
+        app.kubernetes.io/component: dataset
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: dataset
+          image: fanet-defense:0.1.0
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: fanet-evaluate
+          args:
+            - dataset
+            - --n=$(GENERATE_SIZE)
+            - --split=train
+            - --master-seed=$(MASTER_SEED)
+            - --teacher=$(POLICY)
+            - --interval=5
+            - --shard=$(JOB_COMPLETION_INDEX)
+            - --num-shards=$(NUM_SHARDS)
+            - --out=/results/sft-shard-$(JOB_COMPLETION_INDEX).jsonl
+          resources:
+            requests:
+              cpu: 500m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: results
+              mountPath: /results
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: results
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

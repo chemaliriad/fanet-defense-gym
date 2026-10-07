@@ -87,7 +87,18 @@ Design history worth telling: with the team reward alone, PPO barely moved (KL n
 * `bootstrap_ci` (over scenarios), `seed_interval` (Student t over training seeds),
   `paired_difference` (refuses unpaired inputs).
 
-## 7. Running it in five minutes
+## 7. Text interface and datasets (`text_env.py`, `dataset.py`, `llm.py`)
+
+* `render` builds the prompt from `sim.obs` and the neighbour ids in `sim.slots`, nothing else.
+* `parse_actions` never raises: it extracts the first JSON object, validates every action
+  against the current state and reports what it rejected.
+* `FanetTextEnv.step` applies the parsed actions, then no-ops for `decision_interval - 1`
+  steps, and returns the summed simulator reward.
+* `iter_records` replays a teacher through the text env and yields prompt / answer / reward.
+* `ChatCompletionsDefender` builds an OpenAI-compatible request; tests inject a fake transport,
+  so no network call and no key are needed in CI.
+
+## 8. Running it in five minutes
 
 ```bash
 pip install -e ".[dev,train,viz]"

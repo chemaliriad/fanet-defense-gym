@@ -4,6 +4,7 @@ resources:
   - configmap.yaml
   - job-evaluate.yaml
   - job-generate-suite.yaml
+  - job-dataset.yaml
 images:
   - name: fanet-defense
     newTag: "0.1.0"

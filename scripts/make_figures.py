@@ -93,7 +93,7 @@ def fig_results(summary: dict[str, Any], theme: str) -> Path:
             marker="o",
             ls="",
             color=th["s1"],
-            label="learned (5 training seeds, t-interval)",
+            label=f"learned ({len(summary['meta']['seeds'])} training seeds, t-interval)",
         ),
         Line2D(
             [],
