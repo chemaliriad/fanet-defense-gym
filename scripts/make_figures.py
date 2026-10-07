@@ -119,16 +119,21 @@ def fig_curves(summary: dict[str, Any], theme: str) -> Path:
     ax.grid(axis="y", color=th["grid"], lw=1)
     for slot, algo in zip(("s1", "s2", "s3"), LEARNED, strict=True):
         runs = summary["curves"].get(algo) or {}
-        series = [[r for r in rows if "val_return" in r] for rows in runs.values()]
+        sampled = algo == "ppo" and summary["meta"].get("ppo_eval_mode") == "sampled"
+        key = "val_return_sampled" if sampled else "val_return"
+        label = LABELS[algo]
+        if algo == "ppo":
+            label = f"PPO (shared policy, {'sampled actions' if sampled else 'greedy'})"
+        series = [[r for r in rows if key in r] for rows in runs.values()]
         series = [s for s in series if s]
         if not series:
             continue
         n = min(len(s) for s in series)
         x = np.array([r["env_steps"] for r in series[0][:n]]) / 1000
-        y = np.array([[r["val_return"] for r in s[:n]] for s in series])
+        y = np.array([[r[key] for r in s[:n]] for s in series])
         mean = y.mean(axis=0)
         ax.fill_between(x, y.min(axis=0), y.max(axis=0), color=th[slot], alpha=0.10, lw=0)
-        ax.plot(x, mean, color=th[slot], lw=2, solid_capstyle="round", label=LABELS[algo])
+        ax.plot(x, mean, color=th[slot], lw=2, solid_capstyle="round", label=label)
         ax.scatter(
             [x[-1]],
             [mean[-1]],
@@ -156,7 +161,13 @@ def fig_curves(summary: dict[str, Any], theme: str) -> Path:
             )
     ax.set_xlabel("Environment steps (thousands)")
     ax.set_ylabel("Mean return on validation scenarios")
-    ax.legend(loc="lower right", fontsize=7, frameon=False, labelcolor=th["ink2"])
+    ax.legend(
+        loc="upper left",
+        bbox_to_anchor=(0, 0.84),
+        fontsize=7,
+        frameon=False,
+        labelcolor=th["ink2"],
+    )
     fig.tight_layout()
     out = FIG / f"learning_curves_{theme}.png"
     fig.savefig(out, facecolor=th["surface"])
@@ -201,7 +212,7 @@ def fig_snapshot(summary: dict[str, Any], theme: str, t_stop: int = 90) -> Path:
             break
     fig, axes = plt.subplots(1, 2, figsize=(9.4, 5.0), dpi=150, facecolor=th["surface"])
     for ax, sim, title in ((axes[0], a, "No defense"), (axes[1], b, f"Defended by {name}")):
-        info = f"{title}: {int(sim.comp[: sim.n].sum())} of {sim.n} drones compromised at t = {sim.t} s"
+        info = f"{title}\n{int(sim.comp[: sim.n].sum())} of {sim.n} drones compromised at t = {sim.t} s"
         draw_snapshot(ax, sim.snapshot(), spec, theme, info)
     fig.legend(
         handles=legend_handles(theme),
@@ -283,6 +294,18 @@ def results_tables(summary: dict[str, Any]) -> tuple[str, str]:
 def write_results_md(summary: dict[str, Any]) -> Path:
     meta = summary["meta"]
     main, ood = results_tables(summary)
+    s = summary["summary"]
+    random = s["random"]["test"]
+    tuned_false_blocks = s["watchdog_tuned"]["test"]["false_blocks"][0]
+    learned_false_blocks = "; ".join(
+        f"{LABELS[algo]} {s[algo]['test']['false_blocks'][0]:.1f} vs tuned watchdog"
+        f" {tuned_false_blocks:.1f}"
+        for algo in LEARNED
+    )
+    sarsa_returns = ", ".join(
+        f"seed {seed}: {ret:.1f}"
+        for seed, ret in zip(meta["seeds"], s["sarsa"]["test"]["per_seed_ret"], strict=True)
+    )
     paired = summary.get("paired_vs_watchdog_tuned_test", {})
     n_val = meta["val"]["n"]
     ood_sizes = ", ".join(
@@ -308,6 +331,13 @@ def write_results_md(summary: dict[str, Any]) -> Path:
         "Availability is the per-step mission availability averaged over the episode; the compromised share",
         "is averaged over the episode; contained means that the active threat was suppressed for at least",
         "5 consecutive steps.",
+        "",
+        f"Containment alone is gamed by blanket blocking: the random policy achieves"
+        f" {100 * random['contained'][0]:.0f} % containment with"
+        f" {random['false_blocks'][0]:.1f} false blocks per episode. The learned policies"
+        f" block far more than the watchdogs (mean false blocks per episode:"
+        f" {learned_false_blocks}). The SARSA interval is wide because one training seed"
+        f" failed; its per-seed test returns are {sarsa_returns}.",
         "",
         f"## Out-of-distribution families (return; scenarios per family: {ood_sizes})",
         "",

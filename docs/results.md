@@ -26,6 +26,8 @@ Availability is the per-step mission availability averaged over the episode; the
 is averaged over the episode; contained means that the active threat was suppressed for at least
 5 consecutive steps.
 
+Containment alone is gamed by blanket blocking: the random policy achieves 100 % containment with 129.1 false blocks per episode. The learned policies block far more than the watchdogs (mean false blocks per episode: PPO (shared policy) 196.5 vs tuned watchdog 4.4; Q-learning (tabular) 200.7 vs tuned watchdog 4.4; SARSA (tabular) 168.2 vs tuned watchdog 4.4). The SARSA interval is wide because one training seed failed; its per-seed test returns are seed 0: 90.0, seed 1: 96.3, seed 2: 39.1.
+
 ## Out-of-distribution families (return; scenarios per family: larger swarms (21-24 drones) 60, flood-heavy attacks 60, stealthy implants (stealth >= 0.5) 60)
 
 | Policy | Test (in-distribution) | Larger swarms (21-24 drones) | Flood-heavy attacks | Stealthy implants (stealth >= 0.5) |
