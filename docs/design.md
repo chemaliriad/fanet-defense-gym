@@ -182,6 +182,15 @@ uniformly. `mixed` picks a profile per scenario.
 * **Learned**: tabular Q-learning and SARSA on a discretised observation (same inputs,
   coarsened), and PPO with parameter sharing (independent PPO).
 
+PPO can start by behaviour-cloning the watchdog on fresh training scenarios, using only
+the local observations and the same action mask as PPO. Cross-entropy fits the shared
+actor before PPO fine-tuning; the critic is not cloned. The `ppo_bc` baseline uses 64
+scenarios and the validation-tuned watchdog, with its own greedy-or-sampled validation
+choice. Its curve starts at `env_steps = 0` with validation returns and training agreement.
+`bc_env_steps` records the demonstration simulator steps separately (not per-drone rows);
+the training interaction budget is these steps plus the subsequent PPO `env_steps`.
+Setting `bc_scenarios = 0` keeps the original PPO training path.
+
 ## 8b. Text interface for language models
 
 `FanetTextEnv` (Gymnasium, `Text` observation and action spaces) exposes the same scenarios

@@ -170,6 +170,39 @@ def main() -> None:
         log(
             f"ppo evaluation mode chosen on val: {ppo_mode} (greedy {greedy:.1f}, sampled {sampled:.1f})"
         )
+    ppo_bc_mode = "n/a"
+    if "ppo_bc" in args.algos:
+        from fanet_defense.ppo import PPOConfig, train_ppo
+
+        with ProcessPoolExecutor(max_workers=args.workers) as pool:
+            for seed in args.seeds:
+                pcfg = PPOConfig(total_env_steps=args.steps, workers=args.workers, bc_scenarios=64)
+                pol, curve = train_ppo(
+                    pcfg, cfg, ScenarioSampler("mixed"), seed, val, executor=pool, teacher=tuned
+                )
+                pol.name = "ppo_bc"
+                pol.save(out / "policies" / f"ppo_bc_seed{seed}.npz")
+                learned["ppo_bc"][seed], curves["ppo_bc"][seed] = pol, curve
+                log(
+                    f"ppo_bc seed {seed}: final val return greedy {curve[-1].get('val_return', float('nan')):.1f}"
+                    f" / sampled {curve[-1].get('val_return_sampled', float('nan')):.1f}"
+                )
+        # Greedy or sampled actions? Decided on validation only, once for all seeds.
+        greedy = np.mean([curves["ppo_bc"][s][-1]["val_return"] for s in learned["ppo_bc"]])
+        sampled = np.mean(
+            [curves["ppo_bc"][s][-1].get("val_return_sampled", -np.inf) for s in learned["ppo_bc"]]
+        )
+        ppo_bc_mode = "sampled" if sampled > greedy else "greedy"
+        if ppo_bc_mode == "sampled":
+            from fanet_defense.rollout import NumpyPPOPolicy
+
+            learned["ppo_bc"] = {
+                s: NumpyPPOPolicy(p.params, cfg, deterministic=False, seed=s, name="ppo_bc")  # type: ignore[attr-defined]
+                for s, p in learned["ppo_bc"].items()
+            }
+        log(
+            f"ppo_bc evaluation mode chosen on val: {ppo_bc_mode} (greedy {greedy:.1f}, sampled {sampled:.1f})"
+        )
     tab = [(a, s, args.steps) for a in ("q", "sarsa") if a in args.algos for s in args.seeds]
     if tab:
         from fanet_defense.tabular import TabularPolicy
@@ -248,6 +281,7 @@ def main() -> None:
         },
         "val_reference_return": val_reference,
         "ppo_eval_mode": ppo_mode,
+        "ppo_bc_eval_mode": ppo_bc_mode,
         "wall_clock_s": round(time.perf_counter() - t_start, 1),
     }
     try:

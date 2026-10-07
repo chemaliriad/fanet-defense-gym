@@ -25,6 +25,8 @@ from torch import nn
 
 from .config import EnvConfig
 from .evaluate import evaluate
+from .imitation import behaviour_clone, collect_demonstrations
+from .policies import Policy, WatchdogPolicy
 from .rollout import NumpyPPOPolicy, Params, rollout_episode
 from .scenario import ScenarioSampler, ScenarioSpec, split_seeds
 
@@ -52,6 +54,9 @@ class PPOConfig:
     # The team reward is the mean of the local shares, so the sum over agents is unchanged.
     local_weight: float = 0.5
     eval_sampled: bool = True  # also evaluate the stochastic policy (chosen on val)
+    bc_scenarios: int = 0
+    bc_epochs: int = 10
+    bc_lr: float = 1e-3
 
 
 def _layer(i: int, o: int, std: float = float(np.sqrt(2))) -> nn.Linear:
@@ -199,8 +204,9 @@ def train_ppo(
     master_seed: int = 0,
     executor: Executor | None = None,
     log: Callable[[dict[str, float]], None] | None = None,
+    teacher: Policy | None = None,
 ) -> tuple[NumpyPPOPolicy, list[dict[str, float]]]:
-    """Train from scratch on a stream of fresh scenarios; return the policy and its curve."""
+    """Train on fresh scenarios, optionally cloning a teacher before PPO updates."""
     torch.set_num_threads(pcfg.torch_threads)
     torch.manual_seed(seed)
     rng = np.random.default_rng([seed, 4321])
@@ -215,6 +221,36 @@ def train_ppo(
     curve: list[dict[str, float]] = []
     t0 = time.perf_counter()
     try:
+        if pcfg.bc_scenarios > 0:
+            # Separate namespace: neither scenario collection nor BC shuffling advances
+            # the PPO scenario/action/minibatch streams.
+            bc_rng = np.random.default_rng([master_seed, seed, 0xBC])
+            bc_specs = [
+                sampler.sample(int(s)) for s in bc_rng.integers(0, 2**62, size=pcfg.bc_scenarios)
+            ]
+            obs, actions = collect_demonstrations(
+                teacher if teacher is not None else WatchdogPolicy(cfg), bc_specs, cfg
+            )
+            bc_stats = behaviour_clone(
+                model, obs, actions, pcfg.bc_epochs, pcfg.bc_lr, pcfg.minibatch, seed
+            )
+            params = export_params(model)
+            row = {
+                "env_steps": 0.0,
+                "bc_env_steps": float(sum(s.horizon for s in bc_specs)),
+                "bc_agreement": bc_stats["agreement"],
+                "val_return": float("nan"),
+                "val_return_sampled": float("nan"),
+            }
+            if val_specs:
+                res = evaluate(NumpyPPOPolicy(params, cfg), val_specs, cfg, executor=pool)
+                row["val_return"] = float(np.mean([r.ret for r in res]))
+                sampled = NumpyPPOPolicy(params, cfg, deterministic=False, seed=seed)
+                res = evaluate(sampled, val_specs, cfg, executor=pool)
+                row["val_return_sampled"] = float(np.mean([r.ret for r in res]))
+            curve.append(row)
+            if log:
+                log(row)
         for it in range(n_iters):
             opt.param_groups[0]["lr"] = pcfg.lr * max(0.1, 1.0 - it / n_iters)
             params = export_params(model)

@@ -154,7 +154,14 @@ def test_collate_concatenates_agents_and_broadcasts_team_reward():
 def test_ppo_training_smoke_runs_end_to_end():
     sampler = ScenarioSampler("easy", n_range=(6, 8), horizon=20)
     val = generate_suite(2, 0, "val", sampler)
-    pcfg = PPOConfig(total_env_steps=80, episodes_per_iter=2, eval_every_iters=1, minibatch=64)
+    pcfg = PPOConfig(
+        total_env_steps=80,
+        episodes_per_iter=2,
+        eval_every_iters=1,
+        minibatch=64,
+        workers=1,
+        torch_threads=1,
+    )
     with ThreadPoolExecutor(max_workers=1) as pool:
         pol, curve = train_ppo(pcfg, CFG, sampler, seed=0, val_specs=val, executor=pool)
     assert len(curve) == 2
