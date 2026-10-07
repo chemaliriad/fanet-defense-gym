@@ -315,6 +315,11 @@ def write_results_md(summary: dict[str, Any]) -> Path:
     learned_false_blocks = "; ".join(
         f"{LABELS[algo]} {s[algo]['test']['false_blocks'][0]:.1f} vs tuned watchdog"
         f" {tuned_false_blocks:.1f}"
+        + (
+            f" (x{s[algo]['test']['false_blocks'][0] / tuned_false_blocks:.1f})"
+            if tuned_false_blocks
+            else " (ratio undefined: tuned watchdog has zero false blocks)"
+        )
         for algo in LEARNED
         if algo in s
     )
@@ -372,9 +377,9 @@ def write_results_md(summary: dict[str, Any]) -> Path:
         "",
         f"Containment alone is gamed by blanket blocking: the random policy achieves"
         f" {100 * random['contained'][0]:.0f} % containment with"
-        f" {random['false_blocks'][0]:.1f} false blocks per episode. The learned policies"
-        f" block far more than the watchdogs (mean false blocks per episode:"
-        f" {learned_false_blocks}).",
+        f" {random['false_blocks'][0]:.1f} false blocks per episode. Mean false blocks"
+        f" per episode for each learned policy versus the tuned watchdog (ratios to the"
+        f" tuned watchdog in parentheses): {learned_false_blocks}.",
         "",
         "A training seed is marked failed only when its test return is below half of that policy's best seed return.",
         *seed_reports,
