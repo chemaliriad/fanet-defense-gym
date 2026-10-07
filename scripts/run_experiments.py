@@ -101,7 +101,12 @@ def main() -> None:
     ap.add_argument("--workers", type=int, default=5)
     ap.add_argument("--out", default=str(ROOT / "results"))
     ap.add_argument("--algos", nargs="+", default=["ppo", "q", "sarsa"])
+    ap.add_argument("--test-n", type=int, default=200, help="scenarios in the test suite")
+    ap.add_argument(
+        "--ood-n", type=int, default=100, help="scenarios per out-of-distribution suite"
+    )
     args = ap.parse_args()
+    sizes = {name: args.test_n if name == "test" else args.ood_n for name in SUITES}
 
     out = Path(args.out)
     (out / "policies").mkdir(parents=True, exist_ok=True)
@@ -111,8 +116,8 @@ def main() -> None:
 
     val = generate_suite(32, VAL_MASTER, "val", ScenarioSampler("mixed"))
     suites = {
-        name: generate_suite(n, TEST_MASTER, "test", sampler)
-        for name, (sampler, n) in SUITES.items()
+        name: generate_suite(sizes[name], TEST_MASTER, "test", sampler)
+        for name, (sampler, _) in SUITES.items()
     }
 
     # 1. Strong scripted baseline: watchdog thresholds tuned on validation only.
@@ -232,8 +237,8 @@ def main() -> None:
         "seeds": args.seeds,
         "env_config": asdict(cfg),
         "suites": {
-            k: {"n": n, "master_seed": TEST_MASTER, "sampler": repr(s)}
-            for k, (s, n) in SUITES.items()
+            k: {"n": sizes[k], "master_seed": TEST_MASTER, "sampler": repr(s)}
+            for k, (s, _) in SUITES.items()
         },
         "val": {"n": len(val), "master_seed": VAL_MASTER},
         "watchdog_tuned": {

@@ -50,7 +50,7 @@ def multi_source_bfs(usable: np.ndarray, sources: np.ndarray) -> tuple[np.ndarra
     depth = np.full(n_nodes, -1, dtype=np.int64)
     next_hop = np.full(n_nodes, -1, dtype=np.int64)
     depth[sources] = 0
-    fidx = np.flatnonzero(sources)
+    fidx: np.ndarray = np.flatnonzero(sources)
     level = 0
     while fidx.size:
         reach = usable[:, fidx]
@@ -90,7 +90,7 @@ def delivery_probabilities(
 def upstream_flows(depth: np.ndarray, next_hop: np.ndarray, is_flow: np.ndarray) -> np.ndarray:
     """Number of other flows whose route traverses each node (excluding its own flow)."""
     own = (is_flow & (depth > 0)).astype(np.float64)
-    sub = own.copy()
+    sub: np.ndarray = own.copy()
     for lvl in range(int(depth.max()), 0, -1):
         idx = np.flatnonzero(depth == lvl)
         sub += np.bincount(next_hop[idx], weights=sub[idx], minlength=sub.size)
@@ -114,6 +114,29 @@ class Network:
 
 class FanetSim:
     """One episode of one scenario. Drones are nodes ``0..n-1``; the GCS is node ``n``."""
+
+    # State arrays are annotated as plain ndarrays on purpose: numpy's shape-aware stubs
+    # differ between numpy versions and would otherwise make type checking version-dependent.
+    pos: np.ndarray  # (N, 2) positions; N = n drones + GCS
+    wp: np.ndarray  # (N, 2) waypoints
+    speed: np.ndarray  # (N,)
+    comp: np.ndarray  # (N,) compromised (hidden)
+    atk: np.ndarray  # (N,) attack type of each implant, -1 if none (hidden)
+    wake: np.ndarray  # (N,) step at which an implant wakes up (hidden)
+    benign_fwd: np.ndarray  # (N,) forwarding reliability of healthy relays
+    behaving: np.ndarray  # (N,) implants misbehaving this step (hidden)
+    restore_until: np.ndarray  # (N,) 0 = online, else step at which a re-flash ends
+    online: np.ndarray  # (N,)
+    block_until: np.ndarray  # (N, N) [i, j] > now: i blocks j
+    ema_f: np.ndarray  # (N, N) watchdog estimate of j's forwarding ratio, seen by i
+    ema_pdr: np.ndarray  # (n,) own delivery estimate
+    anom: np.ndarray  # (n,) host anomaly score
+    slots: np.ndarray  # (n, K) neighbour slot -> node index, -1 if empty
+    obs: np.ndarray  # (n, obs_dim)
+    local_reward: np.ndarray  # (n,) per-drone share of the team reward
+    _acted: np.ndarray
+    _false_blocked: np.ndarray
+    _dist: np.ndarray
 
     def __init__(self, spec: ScenarioSpec, config: EnvConfig | None = None) -> None:
         self.spec = spec
@@ -311,7 +334,7 @@ class FanetSim:
         depth, next_hop = multi_source_bfs(usable, sources)
 
         # A node suffers congestion from every adjacent flooder it has not blocked.
-        extra = np.zeros(nn)
+        extra: np.ndarray = np.zeros(nn)
         if is_fl.any():
             exposed = (adj[:, is_fl] & ~blk[:, is_fl]).sum(axis=1)
             extra = 1.0 - (1.0 - s.flood_loss) ** exposed
@@ -361,7 +384,7 @@ class FanetSim:
         dd = np.where(cand, self._dist[:n, :n], np.inf)
         order = np.argsort(dd, axis=1, kind="stable")[:, :k]
         valid = np.take_along_axis(cand, order, axis=1)
-        slots = np.where(valid, order, -1)
+        slots: np.ndarray = np.where(valid, order, -1)
         if slots.shape[1] < k:  # tiny swarms: pad with empty slots
             pad = np.full((n, k - slots.shape[1]), -1, dtype=np.int64)
             slots = np.concatenate([slots, pad], axis=1)

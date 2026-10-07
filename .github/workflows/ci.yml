@@ -15,8 +15,8 @@ jobs:
       matrix:
         python: ["3.10", "3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -34,7 +34,7 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build image
         run: docker build -t fanet-defense:ci .
       - name: Smoke-run an evaluation inside the container
@@ -43,7 +43,7 @@ jobs:
   kubernetes-manifests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Render with kustomize
         run: kubectl kustomize k8s/base > rendered.yaml
       - name: Validate against the Kubernetes schemas

@@ -40,7 +40,7 @@ LABELS = {
 }
 LEARNED = ("ppo", "q", "sarsa")
 SUITE_LABELS = {
-    "test": "Test (200, in-distribution)",
+    "test": "Test (in-distribution)",
     "ood_large_swarm": "Larger swarms (21-24 drones)",
     "ood_flood_heavy": "Flood-heavy attacks",
     "ood_stealthy": "Stealthy implants (stealth >= 0.5)",
@@ -82,7 +82,8 @@ def fig_results(summary: dict[str, Any], theme: str) -> Path:
         color=th["ink2"],
     )
     ax.set_yticks(range(len(rows)), [LABELS.get(n, n) for n, *_ in rows])
-    ax.set_xlabel("Episode return on 200 held-out test scenarios (mean, 95% interval)")
+    n_test = summary["meta"]["suites"]["test"]["n"]
+    ax.set_xlabel(f"Episode return on {n_test} held-out test scenarios (mean, 95% interval)")
     lo_all = min(r[2] for r in rows)
     ax.set_xlim(min(0, lo_all - 5), oracle + 12)
     handles = [
