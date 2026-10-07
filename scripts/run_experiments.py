@@ -265,10 +265,21 @@ def main() -> None:
     (out / "summary.json").write_text(
         json.dumps(payload, indent=1, default=float), encoding="utf-8"
     )
-    import pandas as pd
-
-    pd.DataFrame(rows).to_csv(out / "episodes.csv.gz", index=False)
+    write_episodes_csv(rows, out / "episodes.csv.gz")
     log(f"done: {out / 'summary.json'}")
+
+
+def write_episodes_csv(rows: list[dict[str, Any]], path: Path) -> None:
+    """Write UTF-8 CSV in key order with a reproducible gzip header."""
+    import csv
+    import gzip
+    import io
+
+    with io.StringIO(newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(rows[0]) if rows else [])
+        writer.writeheader()
+        writer.writerows(rows)
+        path.write_bytes(gzip.compress(stream.getvalue().encode("utf-8"), mtime=0))
 
 
 if __name__ == "__main__":

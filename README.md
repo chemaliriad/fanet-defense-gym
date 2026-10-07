@@ -18,7 +18,8 @@ are protecting.**
 ## What is in the box
 
 * **Environment**: PettingZoo `ParallelEnv` (one agent per drone, shared spaces, so one
-  policy serves swarms of any size); roughly 1 to 2 ms per step in pure numpy.
+  policy serves swarms of any size); about 0.8 ms per swarm step in pure numpy (30 episodes,
+  14.7 drones on average, one laptop core, `make bench`).
 * **Language-model interface**: the same scenarios as text prompts with JSON answers and
   verifiable rewards (Gymnasium `Text` spaces), a sharded generator of prompt / teacher answer
   / reward records, and a minimal client for OpenAI-compatible endpoints such as Mistral's API.
@@ -32,7 +33,7 @@ are protecting.**
   validation), tabular Q-learning and SARSA, PPO with parameter sharing, privileged oracle.
 * **Evaluation harness**: paired scenarios, multiple training seeds, bootstrap and Student-t
   intervals, out-of-distribution families, reward-hacking tests.
-* **Engineering**: typed package, CLI, 108 tests, GitHub Actions (lint, types, tests on
+* **Engineering**: typed package, CLI, 111 tests, GitHub Actions (lint, types, tests on
   3.10 to 3.12, Docker build, Kubernetes manifest validation), non-root Docker image,
   Indexed Kubernetes Jobs for sharded generation and evaluation.
 
@@ -180,7 +181,8 @@ environment author has to catch before any agent is trained on it.
 
 `fanet-defense generate-suite --shard i --num-shards N` and
 `fanet-defense evaluate --shard i --num-shards N` split a suite into disjoint shards whose
-union is the full suite. [k8s/](k8s/) runs them as Indexed Jobs (non-root, read-only root
+union is the full suite; sampling 8,000 scenario specs takes about 1.3 s on one core.
+[k8s/](k8s/) runs them as Indexed Jobs (non-root, read-only root
 filesystem, no service-account token, all capabilities dropped); `docker build .` produces
 the image.
 

@@ -1,6 +1,6 @@
 PY ?= python
 
-.PHONY: install lint test test-all repro figures docker k8s-render
+.PHONY: install lint test test-all repro bench figures docker k8s-render
 
 install:
 	$(PY) -m pip install -e ".[dev,train,viz]"
@@ -20,6 +20,9 @@ test-all:
 repro:
 	$(PY) scripts/run_experiments.py --steps 300000 --seeds 0 1 2 3 4
 	$(PY) scripts/make_figures.py
+
+bench:
+	$(PY) scripts/bench.py
 
 figures:
 	$(PY) scripts/make_figures.py
