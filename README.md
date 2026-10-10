@@ -109,6 +109,46 @@ fanet-defense dataset --n 1000 --split train --teacher watchdog --interval 5 \
 No language model has been evaluated in this repository yet; the interface, the parser and
 the record generator are what is tested.
 
+## Training exercise mode
+
+Use the same scenarios the agents use for tabletop and hands-on cyber-defense training.
+Read the swarm's telemetry, enter `block d05 d07`, `restore d03`, JSON actions, or `pass`
+(Enter also passes); separate commands with `;`. `quit` ends keyboard input and completes
+the remaining simulation with no actions, preserving comparable scores.
+
+```bash
+fanet-defense play --report exercise.md
+```
+
+Defaults are `--difficulty medium --seed 0 --interval 10 --min-gap 30`.
+Starting at the requested seed, the command selects the first scenario where the default
+watchdog beats no-op by at least `--min-gap` at the chosen interval, and prints the seed used.
+
+Ground truth is revealed only in the after-action report, alongside action verdicts,
+missed attackers, containment time, and no-op/default-watchdog returns on the same scenario
+and decision interval. Invalid input is reported immediately and consumes a decision;
+an invalid shorthand command cancels that line. Feedback uses fixed templates.
+
+The first 14 lines of a real report produced by a scripted watchdog trainee using
+`actions_to_json` on `fanet-defense play` defaults (medium, seed 0, interval 10, min-gap 30):
+
+```text
+# After-action report
+Scenario: `f1cca4fd0ae1` | seed=0 | interval=10s
+
+| Defender | Return | vs watchdog |
+| --- | ---: | ---: |
+| Trainee | 129.5 | +0.0 |
+| No-op | 15.8 | -113.7 |
+| Watchdog (default) | 129.5 | +0.0 |
+
+False blocks: 0; unnecessary restores: 1.
+Invalid inputs: 0; quit early: False.
+Time to containment: 187s; contained: False.
+Containment uses five consecutive threat-free seconds after the first active threat; uncontained times are censored at the horizon (no active threat: 0s).
+
+```
+
 ## The environment in one minute
 
 | | |

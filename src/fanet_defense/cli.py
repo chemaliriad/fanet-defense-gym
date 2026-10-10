@@ -7,6 +7,7 @@ evaluate        run a policy on a suite and print metrics with 95% confidence in
 dataset         write prompt / answer / reward records (text interface) for LLM training
 train           train PPO, Q-learning or SARSA and save the policy
 demo            render one scenario snapshot to PNG
+play            defend one scenario at the keyboard and receive an after-action report
 """
 
 from __future__ import annotations
@@ -164,9 +165,54 @@ def cmd_dataset(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_play(args: argparse.Namespace) -> int:
+    from .exercise import run_exercise
+    from .llm import PolicyTextDefender, run_text_episode
+    from .text_env import FanetTextEnv
+
+    if args.interval < 1:
+        raise SystemExit("--interval must be >= 1")
+    if not np.isfinite(args.min_gap) or args.min_gap < 0:
+        raise SystemExit("--min-gap must be finite and >= 0")
+    sampler = _sampler(args)
+    cfg = EnvConfig()
+    seed = args.seed
+    while True:
+        scenario = sampler.sample(seed)
+        returns = []
+        for policy in (NoOpPolicy(), WatchdogPolicy(cfg)):
+            env = FanetTextEnv(scenario, config=cfg, decision_interval=args.interval)
+            returns.append(run_text_episode(env, PolicyTextDefender(policy, env)).ret)
+        if returns[1] - returns[0] >= args.min_gap:
+            break
+        seed += 1
+    print(f"Exercise seed: {seed}")
+    report = run_exercise(
+        scenario, ask=input, say=print, config=cfg, decision_interval=args.interval
+    )
+    if args.report:
+        path = Path(args.report)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(report.to_markdown(), encoding="utf-8")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="fanet-defense", description=__doc__.split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    play = sub.add_parser("play", help="human training exercise with an after-action report")
+    play.add_argument("--difficulty", choices=["easy", "medium", "hard", "mixed"], default="medium")
+    play.add_argument("--seed", type=int, default=0)
+    play.add_argument("--interval", type=int, metavar="SECONDS", default=10)
+    play.add_argument(
+        "--min-gap",
+        type=float,
+        default=30.0,
+        help="minimum watchdog return advantage over no-op; search seeds starting at --seed",
+    )
+    play.add_argument("--report", default=None, help="write the Markdown after-action report")
+    play.set_defaults(func=cmd_play)
 
     def suite_args(sp: argparse.ArgumentParser) -> None:
         sp.add_argument("--n", type=int, default=200, help="number of scenarios in the suite")

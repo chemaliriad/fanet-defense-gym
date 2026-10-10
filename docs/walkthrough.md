@@ -89,6 +89,7 @@ Design history worth telling: with the team reward alone, PPO barely moved (KL n
 
 ## 7. Text interface and datasets (`text_env.py`, `dataset.py`, `llm.py`)
 
+* `fanet-defense play` (`exercise.py`) runs keyboard training and reveals ground truth only in the final debrief, with paired text-interface no-op and watchdog scores.
 * `render` builds the prompt from `sim.obs` and the neighbour ids in `sim.slots`, nothing else.
 * `parse_actions` never raises: it extracts the first JSON object, validates every action
   against the current state and reports what it rejected.
